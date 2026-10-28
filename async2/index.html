@@ -1,0 +1,124 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="icon" href="/favicon.ico"><meta name="generator" content="Astro v7.3.2"><title>Runtime Async в .NET. Что изменилось</title><link rel="stylesheet" href="/_astro/Layout.Bh4UO3ov.css"></head><body><header class="header" data-astro-cid-nen7h5rs><div class="header-container" data-astro-cid-nen7h5rs><a href="/" class="logo" data-astro-cid-nen7h5rs>БАК</a><nav class="nav" data-astro-cid-nen7h5rs><ul class="nav-list" data-astro-cid-nen7h5rs><li class="nav-item" data-astro-cid-nen7h5rs><a href="/" class="nav-link" data-astro-cid-nen7h5rs>Главная</a></li><li class="nav-item" data-astro-cid-nen7h5rs><a href="/blogs" class="nav-link" data-astro-cid-nen7h5rs>Блоги</a></li><li class="nav-item" data-astro-cid-nen7h5rs><a href="/about" class="nav-link" data-astro-cid-nen7h5rs>О нас</a></li></ul></nav></div></header><main class="container"><h1 id="runtime-async-в-net-что-изменилось">Runtime Async в .NET. Что изменилось</h1>
+<p><small>29 октября 2026 г.</small></p>
+<p>Привет, сегодня затронем тему, что изменилось в асинхронности в .net. Когда в C# 5.0 завезли ключевые слова <code>async</code> и <code>await</code>, это была настоящая магия. Нам разрешили писать сложный асинхронный код так, будто он обычный линейный и синхронный. Но за эту магию компилятору и рантайму все эти годы приходилось расплачиваться тоннами скрытого кода под капотом.</p>
+<p>В новых версиях платформы эта история переписывается с нуля. Разработчики выкатили, пожалуй, самое масштабное архитектурное изменение за последнее десятилетие — <strong>Runtime Async</strong>. Суть логики проста: асинхронные паузы и переключений полностью перенесли со стороны компилятора на сторону райнтайма.</p>
+<p>Давайте разберем, как эта штука устроена, и как рантайм теперь выполняет асинхронный код.</p>
+<hr>
+<h2 id="-как-это-было-раньше-и-работает-сейчас">🛠 Как это было раньше (и работает сейчас)</h2>
+<p>Компилятор, когда видел слово <code>async</code> в определений метода, он генерировал <strong>машину состояний</strong> (<code>IAsyncStateMachine</code>), а не просто компилировал метод, как он есть.</p>
+<h3 id="во-что-превращался-код">Во что превращался код</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="csharp"><code><span class="line"><span style="color:#F97583">public</span><span style="color:#F97583"> async</span><span style="color:#B392F0"> Task</span><span style="color:#E1E4E8">&lt;</span><span style="color:#F97583">int</span><span style="color:#E1E4E8">&gt; </span><span style="color:#B392F0">CalculateAsync</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">int</span><span style="color:#B392F0"> x</span><span style="color:#E1E4E8">)</span></span>
+<span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#F97583">    int</span><span style="color:#B392F0"> y</span><span style="color:#F97583"> =</span><span style="color:#E1E4E8"> x </span><span style="color:#F97583">+</span><span style="color:#79B8FF"> 10</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#F97583">    await</span><span style="color:#E1E4E8"> Task.</span><span style="color:#B392F0">Delay</span><span style="color:#E1E4E8">(</span><span style="color:#79B8FF">100</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#F97583">    return</span><span style="color:#E1E4E8"> y </span><span style="color:#F97583">*</span><span style="color:#79B8FF"> 2</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<p>После компиляции этот метод превращался в синхронный метод, который инициализировал ту самую машину состояний:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="csharp"><code><span class="line"><span style="color:#F97583">public</span><span style="color:#B392F0"> Task</span><span style="color:#E1E4E8">&lt;</span><span style="color:#F97583">int</span><span style="color:#E1E4E8">&gt; </span><span style="color:#B392F0">CalculateAsync</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">int</span><span style="color:#B392F0"> x</span><span style="color:#E1E4E8">)</span></span>
+<span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#F97583">    &lt;</span><span style="color:#E1E4E8">CalculateAsync</span><span style="color:#F97583">&gt;</span><span style="color:#B392F0">d__0</span><span style="color:#B392F0"> stateMachine</span><span style="color:#F97583"> =</span><span style="color:#E1E4E8"> new </span><span style="color:#F97583">&lt;</span><span style="color:#E1E4E8">CalculateAsync</span><span style="color:#F97583">&gt;</span><span style="color:#B392F0">d__0</span><span style="color:#E1E4E8">();</span></span>
+<span class="line"><span style="color:#E1E4E8">    stateMachine.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#FDAEB7;font-style:italic">4__this</span><span style="color:#F97583"> =</span><span style="color:#79B8FF"> this</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#E1E4E8">    stateMachine.x </span><span style="color:#F97583">=</span><span style="color:#E1E4E8"> x;</span></span>
+<span class="line"><span style="color:#E1E4E8">    </span></span>
+<span class="line"><span style="color:#E1E4E8">    stateMachine.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#E1E4E8">t__builder </span><span style="color:#F97583">=</span><span style="color:#E1E4E8"> AsyncTaskMethodBuilder&lt;</span><span style="color:#F97583">int</span><span style="color:#E1E4E8">&gt;.</span><span style="color:#B392F0">Create</span><span style="color:#E1E4E8">();</span></span>
+<span class="line"><span style="color:#E1E4E8">    stateMachine.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#FDAEB7;font-style:italic">1__state</span><span style="color:#F97583"> =</span><span style="color:#F97583"> -</span><span style="color:#79B8FF">1</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">    stateMachine.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#E1E4E8">t__builder.</span><span style="color:#B392F0">Start</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">ref</span><span style="color:#E1E4E8"> stateMachine);</span></span>
+<span class="line"><span style="color:#F97583">    return</span><span style="color:#E1E4E8"> stateMachine.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#E1E4E8">t__builder.Task;</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<p>Вся логика первоначального метода уходила в метод <code>MoveNext()</code> этой структуры, где компилятор строил <code>switch-case</code> или <code>if-ы</code> для переключений состояний:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="csharp"><code><span class="line"><span style="color:#F97583">void</span><span style="color:#E1E4E8"> IAsyncStateMachine.</span><span style="color:#B392F0">MoveNext</span><span style="color:#E1E4E8">()</span></span>
+<span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#F97583">    int</span><span style="color:#B392F0"> num</span><span style="color:#F97583"> =</span><span style="color:#79B8FF"> this</span><span style="color:#E1E4E8">.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#FDAEB7;font-style:italic">1__state</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#F97583">    int</span><span style="color:#B392F0"> result</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#F97583">    try</span></span>
+<span class="line"><span style="color:#E1E4E8">    {</span></span>
+<span class="line"><span style="color:#B392F0">        TaskAwaiter</span><span style="color:#B392F0"> awaiter</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#F97583">        if</span><span style="color:#E1E4E8"> (num </span><span style="color:#F97583">!=</span><span style="color:#79B8FF"> 0</span><span style="color:#E1E4E8">)</span></span>
+<span class="line"><span style="color:#E1E4E8">        {</span></span>
+<span class="line"><span style="color:#6A737D">            // ДО первого await</span></span>
+<span class="line"><span style="color:#79B8FF">            this</span><span style="color:#E1E4E8">.y </span><span style="color:#F97583">=</span><span style="color:#79B8FF"> this</span><span style="color:#E1E4E8">.x </span><span style="color:#F97583">+</span><span style="color:#79B8FF"> 10</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#E1E4E8">            awaiter </span><span style="color:#F97583">=</span><span style="color:#E1E4E8"> Task.</span><span style="color:#B392F0">Delay</span><span style="color:#E1E4E8">(</span><span style="color:#79B8FF">100</span><span style="color:#E1E4E8">).</span><span style="color:#B392F0">GetAwaiter</span><span style="color:#E1E4E8">();</span></span>
+<span class="line"><span style="color:#F97583">            if</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">!</span><span style="color:#E1E4E8">awaiter.IsCompleted)</span></span>
+<span class="line"><span style="color:#E1E4E8">            {</span></span>
+<span class="line"><span style="color:#79B8FF">                this</span><span style="color:#E1E4E8">.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#FDAEB7;font-style:italic">1__state</span><span style="color:#F97583"> =</span><span style="color:#79B8FF"> 0</span><span style="color:#E1E4E8">; </span><span style="color:#6A737D">// Запоминаем, где остановились</span></span>
+<span class="line"><span style="color:#79B8FF">                this</span><span style="color:#E1E4E8">.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#E1E4E8">u__1 </span><span style="color:#F97583">=</span><span style="color:#E1E4E8"> awaiter; </span><span style="color:#6A737D">// Запоминаем, для того, что бы забрать результат</span></span>
+<span class="line"><span style="color:#E1E4E8">                </span></span>
+<span class="line"><span style="color:#6A737D">                // Упаковываем контекст выполнения и регистрируем callback</span></span>
+<span class="line"><span style="color:#79B8FF">                this</span><span style="color:#E1E4E8">.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#E1E4E8">t__builder.</span><span style="color:#B392F0">AwaitUnsafeOnCompleted</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">ref</span><span style="color:#E1E4E8"> awaiter, </span><span style="color:#F97583">ref</span><span style="color:#79B8FF"> this</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#F97583">                return</span><span style="color:#E1E4E8">; </span><span style="color:#6A737D">// Поток освобождается и уходит в пул</span></span>
+<span class="line"><span style="color:#E1E4E8">            }</span></span>
+<span class="line"><span style="color:#E1E4E8">        }</span></span>
+<span class="line"><span style="color:#F97583">        else</span></span>
+<span class="line"><span style="color:#E1E4E8">        {</span></span>
+<span class="line"><span style="color:#6A737D">            // Сюда мы возвращаемся, когда Task.Delay отработал</span></span>
+<span class="line"><span style="color:#E1E4E8">            awaiter </span><span style="color:#F97583">=</span><span style="color:#79B8FF"> this</span><span style="color:#E1E4E8">.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#E1E4E8">u__1;</span></span>
+<span class="line"><span style="color:#79B8FF">            this</span><span style="color:#E1E4E8">.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#E1E4E8">u__1 </span><span style="color:#F97583">=</span><span style="color:#F97583"> default</span><span style="color:#E1E4E8">(</span><span style="color:#B392F0">TaskAwaiter</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#79B8FF">            this</span><span style="color:#E1E4E8">.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#FDAEB7;font-style:italic">1__state</span><span style="color:#F97583"> =</span><span style="color:#F97583"> -</span><span style="color:#79B8FF">1</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#E1E4E8">        }</span></span>
+<span class="line"><span style="color:#E1E4E8">        </span></span>
+<span class="line"><span style="color:#E1E4E8">        awaiter.</span><span style="color:#B392F0">GetResult</span><span style="color:#E1E4E8">(); </span></span>
+<span class="line"><span style="color:#E1E4E8">        result </span><span style="color:#F97583">=</span><span style="color:#79B8FF"> this</span><span style="color:#E1E4E8">.y </span><span style="color:#F97583">*</span><span style="color:#79B8FF"> 2</span><span style="color:#E1E4E8">; </span><span style="color:#6A737D">// После await</span></span>
+<span class="line"><span style="color:#E1E4E8">    }</span></span>
+<span class="line"><span style="color:#F97583">    catch</span><span style="color:#E1E4E8"> (</span><span style="color:#B392F0">Exception</span><span style="color:#B392F0"> exception</span><span style="color:#E1E4E8">)</span></span>
+<span class="line"><span style="color:#E1E4E8">    {</span></span>
+<span class="line"><span style="color:#79B8FF">        this</span><span style="color:#E1E4E8">.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#FDAEB7;font-style:italic">1__state</span><span style="color:#F97583"> =</span><span style="color:#F97583"> -</span><span style="color:#79B8FF">2</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#79B8FF">        this</span><span style="color:#E1E4E8">.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#E1E4E8">t__builder.</span><span style="color:#B392F0">SetException</span><span style="color:#E1E4E8">(exception);</span></span>
+<span class="line"><span style="color:#F97583">        return</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#E1E4E8">    }</span></span>
+<span class="line"><span style="color:#79B8FF">    this</span><span style="color:#E1E4E8">.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#FDAEB7;font-style:italic">1__state</span><span style="color:#F97583"> =</span><span style="color:#F97583"> -</span><span style="color:#79B8FF">2</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#79B8FF">    this</span><span style="color:#E1E4E8">.</span><span style="color:#F97583">&lt;&gt;</span><span style="color:#E1E4E8">t__builder.</span><span style="color:#B392F0">SetResult</span><span style="color:#E1E4E8">(result);</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<h3 id="в-чем-были-главные-проблемы">В чем были главные проблемы:</h3>
+<ul>
+<li><strong>Бойлплейт код:</strong> Каждый <code>async</code>-метод скрывал под собой сгенерированную машину состояний, увеличивая бинарники.</li>
+<li><strong>Нагрузка на GC:</strong> Нужно было обслуживать сгенерированные машины состояний, хранения контекста выполнения.</li>
+<li><strong>Тяжело читаемые стек-трейсы:</strong> При падении ошибки логи были забиты мусором из <code>MoveNext()</code> и <code>TaskAwaiter</code>.</li>
+</ul>
+<hr>
+<h2 id="-как-это-работает-теперь">⚡ Как это работает теперь:</h2>
+<p>В новой модели компилятор C# больше не генерирует машину состояний. Он оставляет метод линейным, размечая в IL-коде низкоуровневые точки ожидания.</p>
+<p>Всю магию переключения берет на себя <strong>JIT-компилятор</strong> и ядро рантайма. Программа теперь компилируется как единый сплошной кусок кода.
+Ниже посмотрим, как теперь выполняется поток асинхронного кода.
+Процесс приостановки и возобновления выглядит так:</p>
+<h3 id="1-встречаем-await-уход-на-паузу">1. Встречаем await (Уход на паузу)</h3>
+<p>Thread выполняет метод и доходит до <code>await</code>. Если задача еще не завершена, например, база данных еще не ответила, тогда рантайм мгновенно делает слепок текущего состояния:</p>
+<ul>
+<li><strong>Создается нативный фрейм паузы (Suspend Frame):</strong> Это небольшой блок памяти, который рантайм выделяет из своего нативного пула.</li>
+<li><strong>Замораживаются регистры процессора:</strong> Все локальные переменные, которые в этот момент лежали прямо в регистрах процессора (<code>RAX</code>, <code>RBX</code> и т.д.), аккуратно копируются в этот фрейм.</li>
+<li><strong>Запоминается адрес возврата (Resume Address):</strong> JIT-компилятор знает точный адрес следующей процессорной инструкции сразу после <code>await</code>. Этот адрес тоже записывается во фрейм.</li>
+<li><strong>Thread свободен:</strong> Текущий поток делает обычный физический <code>return</code>, выходит из метода и возвращается в общую очередь пула заниматься другими задачами.</li>
+</ul>
+<h3 id="2-задача-завершилась">2. Задача завершилась</h3>
+<p>Когда асинхронная операция завершается, пул потоков выделяет свободный thread для продолжения работы.</p>
+<ul>
+<li>Этот thread берет сохраненный нативный фрейм паузы.</li>
+<li><strong>Восстановление контекста:</strong> Он загружает данные из фрейма обратно в регистры процессора. Для процессора ситуация выглядит так, будто локальные переменные никуда и не исчезали.</li>
+<li><strong>Прямой прыжок:</strong> Этот thread считывает из фрейма адрес возобновления и делает низкоуровневую процессорную команду <code>JMP</code> (прыжок) прямо на этот адрес.</li>
+</ul>
+<p>В этот же момент наш thread оказывается ровно на следующей строчке после <code>await</code>. Никаких проверок состояний, никаких обходов через <code>switch</code>. Это прямой, чистый прыжок на уровне команд процессора.</p>
+<p>Концептуально код в рантайме теперь выглядит так:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="csharp"><code><span class="line"><span style="color:#F97583">public</span><span style="color:#B392F0"> Task</span><span style="color:#E1E4E8">&lt;</span><span style="color:#F97583">int</span><span style="color:#E1E4E8">&gt; </span><span style="color:#B392F0">CalculateAsync</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">int</span><span style="color:#B392F0"> x</span><span style="color:#E1E4E8">)</span></span>
+<span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#F97583">    int</span><span style="color:#B392F0"> y</span><span style="color:#F97583"> =</span><span style="color:#E1E4E8"> x </span><span style="color:#F97583">+</span><span style="color:#79B8FF"> 10</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#F97583">    var</span><span style="color:#B392F0"> awaiter</span><span style="color:#F97583"> =</span><span style="color:#E1E4E8"> Task.</span><span style="color:#B392F0">Delay</span><span style="color:#E1E4E8">(</span><span style="color:#79B8FF">100</span><span style="color:#E1E4E8">).</span><span style="color:#B392F0">GetAwaiter</span><span style="color:#E1E4E8">();</span></span>
+<span class="line"><span style="color:#E1E4E8">    </span></span>
+<span class="line"><span style="color:#F97583">    if</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">!</span><span style="color:#E1E4E8">awaiter.IsCompleted)</span></span>
+<span class="line"><span style="color:#E1E4E8">    {</span></span>
+<span class="line"><span style="color:#6A737D">        // Рантайм сохраняет регистры CPU </span></span>
+<span class="line"><span style="color:#6A737D">        // и адрес следующей инструкции в Suspend Frame:</span></span>
+<span class="line"><span style="color:#E1E4E8">        Runtime.</span><span style="color:#B392F0">SuspendAndRegisterContinuation</span><span style="color:#E1E4E8">(awaiter); </span></span>
+<span class="line"><span style="color:#F97583">        return</span><span style="color:#E1E4E8">; </span></span>
+<span class="line"><span style="color:#E1E4E8">    }</span></span>
+<span class="line"><span style="color:#E1E4E8">    </span></span>
+<span class="line"><span style="color:#6A737D">    // Точка автоматического возобновления (Resume Point). </span></span>
+<span class="line"><span style="color:#6A737D">    // Поток Б прыгнет прямо сюда по команде JMP.</span></span>
+<span class="line"><span style="color:#F97583">    return</span><span style="color:#E1E4E8"> y </span><span style="color:#F97583">*</span><span style="color:#79B8FF"> 2</span><span style="color:#E1E4E8">; </span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<h2 id="-что-нам-это-дает-на-практике">🔥 Что нам это дает на практике?</h2>
+<ol>
+<li><strong>Хорошая экономия памяти:</strong> Меньше сгенерированного IL-кода — меньше размер скомпилированного бинарника.</li>
+<li><strong>Комфортный дебаг:</strong> Точки останова (breakpoints) работают нативно, а профайлеры больше не сходят с ума.</li>
+<li><strong>Более эффекттвный механизм асинхронности:</strong> Происходит меньше затрат на обслуживание машин состоянии.</li>
+</ol>
+</main></body></html>
