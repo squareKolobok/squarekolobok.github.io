@@ -1,0 +1,265 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="icon" href="/favicon.ico"><meta name="generator" content="Astro v7.3.2"><title>OpenAI API</title><link rel="stylesheet" href="/_astro/Layout.Bh4UO3ov.css"></head><body><header class="header" data-astro-cid-nen7h5rs><div class="header-container" data-astro-cid-nen7h5rs><a href="/" class="logo" data-astro-cid-nen7h5rs>БАК</a><nav class="nav" data-astro-cid-nen7h5rs><ul class="nav-list" data-astro-cid-nen7h5rs><li class="nav-item" data-astro-cid-nen7h5rs><a href="/" class="nav-link" data-astro-cid-nen7h5rs>Главная</a></li><li class="nav-item" data-astro-cid-nen7h5rs><a href="/blogs" class="nav-link" data-astro-cid-nen7h5rs>Блоги</a></li><li class="nav-item" data-astro-cid-nen7h5rs><a href="/about" class="nav-link" data-astro-cid-nen7h5rs>О нас</a></li></ul></nav></div></header><main class="container"><h1 id="openai-api">OpenAI API</h1>
+<p><small>02 ноября 2026 г.</small></p>
+<p>Всем привет, с вами колобок. Сегодня я решил разобраться, как отправлять запросы в LLM. Сильно вдаваться в подробности не хочу, поэтому будет отправляться только текст, без файлов.
+Первое, что я узнал - очень часто используют OpenAI API для совместимости и упрощения работы. При желании можно работать с конкретным api определенного поставщика, но если такой задачи нет, то используют для упрощения режим OpenAI Compatible.</p>
+<h2 id="формат-запроса">Формат запроса</h2>
+<p>Вот мы подошли к формату запроса. Начнем с авторизации. Обычно авторизация происходит через <strong>Bearer</strong> токен, хотя тоже может отличаться у некоторых поставщиков - читайте их документацию перед работой.</p>
+<p>Запросы отправляются на эндпоинт - <code>/v1/chat/completions</code>.</p>
+<p>А теперь взглянем на формат запроса в минимальном виде:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="json"><code><span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#79B8FF">  "model"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"llm-model-name"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">  "messages"</span><span style="color:#E1E4E8">: [</span></span>
+<span class="line"><span style="color:#E1E4E8">    {</span></span>
+<span class="line"><span style="color:#79B8FF">      "role"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"user"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">      "content"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Как пройти в библиотеку?"</span></span>
+<span class="line"><span style="color:#E1E4E8">    }</span></span>
+<span class="line"><span style="color:#E1E4E8">  ]</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<p>Где
+<code>model</code> - название модели из списка доступных
+<code>messages</code> - список вопросов-ответов с указанием от кого.</p>
+<p>В схеме от OpenAI я нашел 5 ролей: system, user, assistant, tool, developer. Если есть желание, можно посмотреть в их <a href="https://github.com/openai/openai-openapi">репозитории</a>, там указаны json схема и open api файл.</p>
+<p>Возможно, самые внимательные уже догадались, как происходит работа - LLM не хранит у себя информацию о сообщениях чата, она получает их с каждым новым запросом генерации текста. Лично для меня это было открытием и после этого я по новой взглянул на их работу. Возможно это лично я привык, что данные у них есть, они уже отправлялись, почему бы и не хранить их, но это ложится на плечи того, кто отправляет запросы. И так же тут можно проследить лимит контекстного окна для LLM - большой ответ забьет пространство на следующий вопрос.</p>
+<p>Давайте теперь погрузимся чуть глубже в формат запроса:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="json"><code><span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#79B8FF">  "model"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"llm-model-name"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">  "messages"</span><span style="color:#E1E4E8">: [</span></span>
+<span class="line"><span style="color:#E1E4E8">    {</span></span>
+<span class="line"><span style="color:#79B8FF">      "role"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"system"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">      "content"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Ты — крутой ИИ-помощник, отвечай полезно, бесполезно не отвечай."</span></span>
+<span class="line"><span style="color:#E1E4E8">    },</span></span>
+<span class="line"><span style="color:#E1E4E8">    {</span></span>
+<span class="line"><span style="color:#79B8FF">      "role"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"user"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">      "content"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Как пройти в библиотеку?"</span></span>
+<span class="line"><span style="color:#E1E4E8">    },</span></span>
+<span class="line"><span style="color:#E1E4E8">    {</span></span>
+<span class="line"><span style="color:#79B8FF">      "role"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"assistant"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">      "content"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Все очень просто - открой карты, вбей </span><span style="color:#79B8FF">\"</span><span style="color:#9ECBFF">библиотека</span><span style="color:#79B8FF">\"</span><span style="color:#9ECBFF"> в поиск и иди по указанному пути."</span></span>
+<span class="line"><span style="color:#E1E4E8">    }</span></span>
+<span class="line"><span style="color:#E1E4E8">  ],</span></span>
+<span class="line"><span style="color:#79B8FF">  "temperature"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">1.0</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">  "max_tokens"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">1024</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">  "max_completion_tokens"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">1024</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">  "stream"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">false</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">  "tools"</span><span style="color:#E1E4E8">: []</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<p>Где
+<code>temperature</code> - параметр креативности от 0 до 2. Чем выше, тем больше креативность и шанс получить бред.
+<code>max_tokens</code> - максимальное число токенов на генерацию, после чего ее ответ будет остановлен. Есть еще этот же параметр, но с названием <code>max_completion_tokens</code>. Он считается новее, т.к. обрезает генерацию с учетом скрытых токенов.
+<code>stream</code> - нужно получать ответ по частям или весь сразу
+<code>tools</code> - список инструментов, доступных агенту с описанием работы. Именно они используются агентами для взаимодействия со всем окружением.</p>
+<p>Стоит сказать, что вместо <code>temperature</code> можно указать <code>reasoning.effort</code> - уровень размышлений, если они есть у запрашиваемой модели. Как сказано в документации OpenAI этот параметр несовместим с температурой, только если не выбрано <code>none</code>. Возможно это касается только последних моделей OpenAI и у других провайдеров оно работать будет. Возможные варианты: <code>none</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>.</p>
+<p>Давайте чуть подробней остановимся на отличии <code>max_tokens</code> от <code>max_completion_tokens</code>. Первый отвечает за максимальное число токенов в ответе. Второй за максимальное число потраченных токенов. Некоторые модели могут включить процесс размышления, в котором не будут возвращать ответ, но будут тратить токены - это ключевая разница. Можно указать <code>max_completion_tokens</code> очень низким и все токены потратятся на размышление, без возврата ответа. Можно указать <code>max_tokens</code> и потратить на генерацию ответа больше токенов, чем в нем указано. Это все стоит помнить и учитывать при работе с LLM.</p>
+<p>Теперь немного погрузимся в <code>tools</code>, но поверхностно. В первую очередь это интересно агентам, для взаимодействия с окружением. Тут находится список функций, с их описанием и названием параметров, которые может вызвать LLM. В каждой функции есть название, описание, параметры. Я бы тут обратил внимание, что чем больше функций - тем больше они будут забивать контекст LLM. Если ставить много MCP-серверов в агент, то можно забить ему контекст запроса ненужной информацией.</p>
+<p>Пример функции:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="json"><code><span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#79B8FF">    "type"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"function"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">    "function"</span><span style="color:#E1E4E8">: {</span></span>
+<span class="line"><span style="color:#79B8FF">        "name"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"get_weather"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">        "description"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Получить текущую погоду"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">        "parameters"</span><span style="color:#E1E4E8">: {</span></span>
+<span class="line"><span style="color:#79B8FF">            "type"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"object"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">            "properties"</span><span style="color:#E1E4E8">: {</span></span>
+<span class="line"><span style="color:#79B8FF">                "location"</span><span style="color:#E1E4E8">: {</span><span style="color:#79B8FF">"type"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"string"</span><span style="color:#E1E4E8">, </span><span style="color:#79B8FF">"description"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Город"</span><span style="color:#E1E4E8">},</span></span>
+<span class="line"><span style="color:#79B8FF">                "unit"</span><span style="color:#E1E4E8">: {</span><span style="color:#79B8FF">"type"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"string"</span><span style="color:#E1E4E8">, </span><span style="color:#79B8FF">"enum"</span><span style="color:#E1E4E8">: [</span><span style="color:#9ECBFF">"celsius"</span><span style="color:#E1E4E8">, </span><span style="color:#9ECBFF">"fahrenheit"</span><span style="color:#E1E4E8">]}</span></span>
+<span class="line"><span style="color:#E1E4E8">            },</span></span>
+<span class="line"><span style="color:#79B8FF">            "required"</span><span style="color:#E1E4E8">: [</span><span style="color:#9ECBFF">"location"</span><span style="color:#E1E4E8">]</span></span>
+<span class="line"><span style="color:#E1E4E8">        }</span></span>
+<span class="line"><span style="color:#E1E4E8">    }</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<p>Можно еще упомянуть параметр <code>"response_format": { "type": "json_object" }</code> - отвечает за возвращаемый формат ответа, в данном случае json. Указывается в теле основного запроса, но настоятельно рекомендуется в таких случаях указывать и в запросе информацию, что нужен структурируемый ответ.</p>
+<h2 id="формат-ответа">Формат ответа</h2>
+<p>Теперь посмотрим на ответ.</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="json"><code><span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#79B8FF">  "id"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"generated-id1"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">  "object"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"chat.completion"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">  "created"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">1761465600</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">  "model"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"llm-model-name"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">  "choices"</span><span style="color:#E1E4E8">: [</span></span>
+<span class="line"><span style="color:#E1E4E8">    {</span></span>
+<span class="line"><span style="color:#79B8FF">      "index"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">0</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">      "message"</span><span style="color:#E1E4E8">: {</span></span>
+<span class="line"><span style="color:#79B8FF">        "role"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"assistant"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">        "reasoning_content"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Новый запрос, пора работать"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">        "content"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"Все очень просто - открой карты, вбей </span><span style="color:#79B8FF">\"</span><span style="color:#9ECBFF">библиотека</span><span style="color:#79B8FF">\"</span><span style="color:#9ECBFF"> в поиск и иди по указанному пути."</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">        "refusal"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">null</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">        "tool_calls"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">null</span></span>
+<span class="line"><span style="color:#E1E4E8">      },</span></span>
+<span class="line"><span style="color:#79B8FF">      "finish_reason"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"stop"</span></span>
+<span class="line"><span style="color:#E1E4E8">    }</span></span>
+<span class="line"><span style="color:#E1E4E8">  ],</span></span>
+<span class="line"><span style="color:#79B8FF">  "usage"</span><span style="color:#E1E4E8">: {</span></span>
+<span class="line"><span style="color:#79B8FF">    "prompt_tokens"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">24</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">    "completion_tokens"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">11</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">    "total_tokens"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">35</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">    "prompt_tokens_details"</span><span style="color:#E1E4E8">: {</span></span>
+<span class="line"><span style="color:#79B8FF">      "cached_tokens"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">0</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">      "created_cache_tokens"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">0</span></span>
+<span class="line"><span style="color:#E1E4E8">    },</span></span>
+<span class="line"><span style="color:#79B8FF">    "completion_tokens_details"</span><span style="color:#E1E4E8">: {</span></span>
+<span class="line"><span style="color:#79B8FF">      "reasoning_tokens"</span><span style="color:#E1E4E8">: </span><span style="color:#79B8FF">0</span></span>
+<span class="line"><span style="color:#E1E4E8">    }</span></span>
+<span class="line"><span style="color:#E1E4E8">  }</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<p>Разберем поля чуть подробнее:</p>
+<ul>
+<li><code>id</code> - id генерации. Произвольное значение, при каждом вызове новое.</li>
+<li><code>object</code> - всегда <code>chat.completion</code></li>
+<li><code>created</code> - время генерации</li>
+<li><code>model</code> - модель, которая генерировала ответ</li>
+<li><code>choices</code> - ответы. Чаще всего один, на них подробнее остановимся ниже</li>
+<li><code>usage</code> - информация о статистике по токенам. Полезна для получения информации о затратах, объеме контекстного окна</li>
+</ul>
+<p>Там есть и другие поля, но они менее интересны, поэтому тут разбирать их не буду.</p>
+<h3 id="описание-choices">Описание choices</h3>
+<p>Теперь внимательнее посмотрим на <code>choices</code> - можно обратить внимание, что это список вариантов ответа. Хотя чаще всего приходит один. Теперь что находится в нем:</p>
+<ul>
+<li><code>index</code> - индекс варианта ответа, начинается от 0</li>
+<li><code>role</code> - указывает, кто ответил, всегда <code>assistant</code></li>
+<li><code>content</code> - Текст ответа. Возможно значение <code>null</code> при вызове инструментов</li>
+<li><code>reasoning_content</code> - Текст рассуждений до генерации. У OpenAI нет его в выводе, Может быть <code>null</code></li>
+<li><code>refusal</code> - Текст отказа, если модель отказалась генерировать ответ.</li>
+<li><code>tool_calls</code> - массив для вызова функций агентом. Тут может быть и <code>function_call</code>, разница в числе функций для вызова. Первый способен отправить несколько функций для вызова. Второй только одну.</li>
+<li><code>finish_reason</code> - причина завершения генерации.</li>
+</ul>
+<h4 id="описание-finish_reason">Описание finish_reason</h4>
+<p>Тут возможно несколько причин:</p>
+<ol>
+<li><code>stop</code> — модель закончила генерацию сама</li>
+<li><code>length</code> — достигнут лимит выходных токенов</li>
+<li><code>tool_calls</code> — модель просит вызвать функцию, нужно выполнить её и сделать второй запрос</li>
+<li><code>function_call</code> - аналог <code>tool_calls</code>, зависит от того, что поддерживает LLM</li>
+<li><code>content_filter</code> — сработала фильтрация контента</li>
+<li><code>null</code> — генерация ещё не завершена, актуально для стриминговой генерации</li>
+</ol>
+<h3 id="описание-usage">Описание usage</h3>
+<p>Поле может отсутствовать, по хорошему это нужно проверять. Как было сказано, поле используется для получения информации о генерации: лимит токенов, затраты и все отсюда вытекающее.</p>
+<p>Поля:</p>
+<ul>
+<li><code>prompt_tokens</code> - количество токенов входного запроса</li>
+<li><code>completion_tokens</code> - количество сгенерированных токенов</li>
+<li><code>total_tokens</code> - сумма <code>prompt_tokens</code> и <code>completion_tokens</code></li>
+<li><code>prompt_tokens_details.cached_tokens</code> - количество токенов, загруженных из кеша</li>
+<li><code>prompt_tokens_details.created_cache_tokens</code> - количество токенов, загруженных в кеш. У самого OpenAI его нет</li>
+<li><code>completion_tokens_details.reasoning_tokens</code> - токенов, потраченных на размышления</li>
+</ul>
+<h3 id="стриминг-ответа">Стриминг ответа</h3>
+<p>Все выше сказанное больше относится к выключенному стримингу ответа. При стриминге же ответ делится на чанки и часть полей просто записывается в <code>null</code>: <code>finish_reason</code> и <code>usage</code> для примера. Они получают значения только к концу ответа.</p>
+<p>Сам стриминг выглядит примерно так:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="txt"><code><span class="line"><span>data: {"id":"generated-id1","object":"chat.completion.chunk","created":1761465600,"model":"llm-model-name","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>data: {"id":"generated-id1","object":"chat.completion.chunk","created":1761465600,"model":"llm-model-name","choices":[{"index":0,"delta":{"content":"Прив"},"finish_reason":null}]}</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>data: {"id":"generated-id1","object":"chat.completion.chunk","created":1761465600,"model":"llm-model-name","choices":[{"index":0,"delta":{"content":"ет!"},"finish_reason":null}]}</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>data: {"id":"generated-id1","object":"chat.completion.chunk","created":1761465600,"model":"llm-model-name","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage": { ... }}</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>data: [DONE]</span></span></code></pre>
+<p>Ключевые моменты:</p>
+<ol>
+<li>Новые данные приходят в отдельном json, по формату выше</li>
+<li>Каждая строка с данными начинается с <code>data</code></li>
+<li>Большинство полей большую часть времени принимает <code>null</code></li>
+<li><code>finish_reason</code> приходит только в последнем ответе</li>
+<li><code>data: [DONE]</code> - может не прийти, зависит от провайдера LLM</li>
+<li><code>usage</code> может не прийти в последнем чанке, тоже зависимость от провайдера LLM</li>
+<li>Ответ находится не в <code>message</code>, а в <code>delta</code></li>
+<li>Для получения текста ответа - нужно склеивать <code>content</code> и размышления, если есть</li>
+</ol>
+<h2 id="промежуточные-мысли">Промежуточные мысли</h2>
+<p>Глядя на все, что указано, мне приходит в голову простая мысль - кто-то забил на версионирование api, хотя и указал это в url.</p>
+<p>Если с форматом ответа еще не так много проблем - можно игнорировать неизвестные поля, перезаписывать значения из одних полей в другие, то с форматом запроса проблем больше. OpenAI может вернуть ошибку, если отправишь несуществующие поля в json. Другие поставщики тоже могут отправить соответствующую ошибку.</p>
+<p>После таких наблюдений начинаешь проникаться еще большим уважением к тем, кто поддерживает агентов для разных поставщиков.</p>
+<h2 id="практический-опыт">Практический опыт</h2>
+<p>Пришла пора посмотреть практический опыт работы через api на <sub><sub><sup>❤️</sup></sub></sub>net.</p>
+<p>Начнем с моделей запроса:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="csharp"><code><span class="line"><span style="color:#F97583">public</span><span style="color:#F97583"> class</span><span style="color:#B392F0"> Body</span></span>
+<span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#F97583">  public</span><span style="color:#F97583"> required</span><span style="color:#F97583"> string</span><span style="color:#B392F0"> Model</span><span style="color:#E1E4E8"> { </span><span style="color:#F97583">get</span><span style="color:#E1E4E8">; </span><span style="color:#F97583">set</span><span style="color:#E1E4E8">; }</span></span>
+<span class="line"><span style="color:#F97583">  public</span><span style="color:#F97583"> required</span><span style="color:#B392F0"> Collection</span><span style="color:#E1E4E8">&lt;</span><span style="color:#B392F0">Message</span><span style="color:#E1E4E8">&gt; </span><span style="color:#B392F0">Messages</span><span style="color:#E1E4E8"> { </span><span style="color:#F97583">get</span><span style="color:#E1E4E8">; </span><span style="color:#F97583">set</span><span style="color:#E1E4E8">; }</span></span>
+<span class="line"><span style="color:#F97583">  public</span><span style="color:#F97583"> bool</span><span style="color:#B392F0"> Stream</span><span style="color:#E1E4E8"> { </span><span style="color:#F97583">get</span><span style="color:#E1E4E8">; </span><span style="color:#F97583">set</span><span style="color:#E1E4E8">; }</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">public</span><span style="color:#F97583"> class</span><span style="color:#B392F0"> Message</span></span>
+<span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#F97583">  public</span><span style="color:#F97583"> required</span><span style="color:#F97583"> string</span><span style="color:#B392F0"> Role</span><span style="color:#E1E4E8"> { </span><span style="color:#F97583">get</span><span style="color:#E1E4E8">; </span><span style="color:#F97583">set</span><span style="color:#E1E4E8">; }</span></span>
+<span class="line"><span style="color:#F97583">  public</span><span style="color:#F97583"> required</span><span style="color:#F97583"> string</span><span style="color:#B392F0"> Content</span><span style="color:#E1E4E8"> { </span><span style="color:#F97583">get</span><span style="color:#E1E4E8">; </span><span style="color:#F97583">set</span><span style="color:#E1E4E8">; }</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<p>Дальше создадим модели для ответа:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="csharp"><code><span class="line"><span style="color:#F97583">internal</span><span style="color:#F97583"> class</span><span style="color:#B392F0"> Response</span></span>
+<span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#F97583">  public</span><span style="color:#B392F0"> Collection</span><span style="color:#E1E4E8">&lt;</span><span style="color:#B392F0">Choice</span><span style="color:#E1E4E8">&gt; </span><span style="color:#B392F0">Choices</span><span style="color:#E1E4E8"> { </span><span style="color:#F97583">get</span><span style="color:#E1E4E8">; </span><span style="color:#F97583">set</span><span style="color:#E1E4E8">; } </span><span style="color:#F97583">=</span><span style="color:#E1E4E8"> [];</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">public</span><span style="color:#F97583"> class</span><span style="color:#B392F0"> Choice</span></span>
+<span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#F97583">  public</span><span style="color:#B392F0"> Message</span><span style="color:#E1E4E8">? </span><span style="color:#B392F0">Message</span><span style="color:#E1E4E8"> { </span><span style="color:#F97583">get</span><span style="color:#E1E4E8">; </span><span style="color:#F97583">set</span><span style="color:#E1E4E8">; } </span><span style="color:#6A737D">//для запроса при stream = false</span></span>
+<span class="line"><span style="color:#F97583">  public</span><span style="color:#B392F0"> Message</span><span style="color:#E1E4E8">? </span><span style="color:#B392F0">Delta</span><span style="color:#E1E4E8"> { </span><span style="color:#F97583">get</span><span style="color:#E1E4E8">; </span><span style="color:#F97583">set</span><span style="color:#E1E4E8">; } </span><span style="color:#6A737D">//для запроса при stream = true</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<p>Получать информацию об индексе, смотреть число ответов и тому подобное не будем для простоты. Только посмотрим как происходит работа.</p>
+<p>Теперь создадим класс для отправки запросов:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="csharp"><code><span class="line"><span style="color:#F97583">public</span><span style="color:#F97583"> class</span><span style="color:#B392F0"> OpenAiClient</span></span>
+<span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#F97583">  private</span><span style="color:#B392F0"> List</span><span style="color:#E1E4E8">&lt;</span><span style="color:#B392F0">Message</span><span style="color:#E1E4E8">&gt; </span><span style="color:#B392F0">messages</span><span style="color:#F97583"> =</span><span style="color:#F97583"> new</span><span style="color:#E1E4E8">(); </span><span style="color:#6A737D">// история общения</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#6A737D">  //Часть полей отсутствует для сокращения объема</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">  public</span><span style="color:#F97583"> async</span><span style="color:#B392F0"> Task</span><span style="color:#E1E4E8">&lt;</span><span style="color:#F97583">string</span><span style="color:#E1E4E8">&gt; </span><span style="color:#B392F0">GetAiResponseAsync</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">string</span><span style="color:#B392F0"> message</span><span style="color:#E1E4E8">)</span></span>
+<span class="line"><span style="color:#E1E4E8">  {</span></span>
+<span class="line"><span style="color:#6A737D">    //Формируем и отправляем запрос</span></span>
+<span class="line"><span style="color:#F97583">    var</span><span style="color:#B392F0"> request</span><span style="color:#F97583"> =</span><span style="color:#F97583"> new</span><span style="color:#B392F0"> Body</span><span style="color:#E1E4E8">()</span></span>
+<span class="line"><span style="color:#E1E4E8">    {</span></span>
+<span class="line"><span style="color:#E1E4E8">      Model </span><span style="color:#F97583">=</span><span style="color:#E1E4E8"> model,</span></span>
+<span class="line"><span style="color:#E1E4E8">      Messages </span><span style="color:#F97583">=</span></span>
+<span class="line"><span style="color:#E1E4E8">      [</span></span>
+<span class="line"><span style="color:#F97583">        ..</span><span style="color:#E1E4E8">messages,</span></span>
+<span class="line"><span style="color:#F97583">        new</span><span style="color:#E1E4E8">()</span></span>
+<span class="line"><span style="color:#E1E4E8">        {</span></span>
+<span class="line"><span style="color:#E1E4E8">          Role </span><span style="color:#F97583">=</span><span style="color:#9ECBFF"> "user"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#E1E4E8">          Content </span><span style="color:#F97583">=</span><span style="color:#E1E4E8"> message,</span></span>
+<span class="line"><span style="color:#E1E4E8">        }</span></span>
+<span class="line"><span style="color:#E1E4E8">      ],</span></span>
+<span class="line"><span style="color:#E1E4E8">      Stream </span><span style="color:#F97583">=</span><span style="color:#79B8FF"> false</span></span>
+<span class="line"><span style="color:#E1E4E8">    };</span></span>
+<span class="line"><span style="color:#F97583">    var</span><span style="color:#B392F0"> json</span><span style="color:#F97583"> =</span><span style="color:#E1E4E8"> JsonSerializer.</span><span style="color:#B392F0">Serialize</span><span style="color:#E1E4E8">(request, options);</span></span>
+<span class="line"><span style="color:#F97583">    var</span><span style="color:#B392F0"> content</span><span style="color:#F97583"> =</span><span style="color:#F97583"> new</span><span style="color:#B392F0"> StringContent</span><span style="color:#E1E4E8">(json, Encoding.UTF8, </span><span style="color:#9ECBFF">"application/json"</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#E1E4E8">    </span></span>
+<span class="line"><span style="color:#F97583">    var</span><span style="color:#B392F0"> apiResponse</span><span style="color:#F97583"> =</span><span style="color:#F97583"> await</span><span style="color:#E1E4E8"> client.</span><span style="color:#B392F0">PostAsync</span><span style="color:#E1E4E8">(CHAT_URL, content);</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">    apiResponse.</span><span style="color:#B392F0">EnsureSuccessStatusCode</span><span style="color:#E1E4E8">();</span></span>
+<span class="line"><span style="color:#E1E4E8">    </span></span>
+<span class="line"><span style="color:#6A737D">    //Десериализуем ответ и сохраняем его для следующих отправлений</span></span>
+<span class="line"><span style="color:#F97583">    var</span><span style="color:#B392F0"> response</span><span style="color:#F97583"> =</span><span style="color:#F97583"> await</span><span style="color:#E1E4E8"> apiResponse.Content.</span><span style="color:#B392F0">ReadFromJsonAsync</span><span style="color:#E1E4E8">&lt;</span><span style="color:#B392F0">Models</span><span style="color:#E1E4E8">.</span><span style="color:#B392F0">Response</span><span style="color:#E1E4E8">.</span><span style="color:#B392F0">Response</span><span style="color:#E1E4E8">&gt;(options);</span></span>
+<span class="line"><span style="color:#F97583">    var</span><span style="color:#B392F0"> responseMessage</span><span style="color:#F97583"> =</span><span style="color:#E1E4E8"> response</span><span style="color:#F97583">?</span><span style="color:#E1E4E8">.Choices.</span><span style="color:#B392F0">FirstOrDefault</span><span style="color:#E1E4E8">()</span><span style="color:#F97583">?</span><span style="color:#E1E4E8">.Message</span><span style="color:#F97583">?</span><span style="color:#E1E4E8">.Content </span><span style="color:#F97583">??</span><span style="color:#F97583"> string</span><span style="color:#E1E4E8">.Empty;</span></span>
+<span class="line"><span style="color:#B392F0">    SaveMessage</span><span style="color:#E1E4E8">(message, </span><span style="color:#9ECBFF">"user"</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#B392F0">    SaveMessage</span><span style="color:#E1E4E8">(responseMessage, </span><span style="color:#9ECBFF">"assistant"</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">    return</span><span style="color:#E1E4E8"> responseMessage;</span></span>
+<span class="line"><span style="color:#E1E4E8">  }</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<p>После можно создать в <code>Program.cs</code> указанный класс и начать общаться с LLM:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="csharp"><code><span class="line"><span style="color:#F97583">var</span><span style="color:#B392F0"> settings</span><span style="color:#F97583"> =</span><span style="color:#F97583"> new</span><span style="color:#B392F0"> Settings</span><span style="color:#E1E4E8">()</span></span>
+<span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#6A737D">  //...</span></span>
+<span class="line"><span style="color:#E1E4E8">};</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">using</span><span style="color:#F97583"> var</span><span style="color:#B392F0"> client</span><span style="color:#F97583"> =</span><span style="color:#F97583"> new</span><span style="color:#B392F0"> OpenAiClient</span><span style="color:#E1E4E8">(settings);</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">Console.</span><span style="color:#B392F0">WriteLine</span><span style="color:#E1E4E8">(</span><span style="color:#9ECBFF">"Приложение запущено. Начните беседу (для выхода напишите 'exit'):"</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">while</span><span style="color:#E1E4E8"> (</span><span style="color:#79B8FF">true</span><span style="color:#E1E4E8">)</span></span>
+<span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#E1E4E8">  Console.</span><span style="color:#B392F0">Write</span><span style="color:#E1E4E8">(</span><span style="color:#9ECBFF">"&gt; "</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#F97583">  var</span><span style="color:#B392F0"> input</span><span style="color:#F97583"> =</span><span style="color:#E1E4E8"> Console.</span><span style="color:#B392F0">ReadLine</span><span style="color:#E1E4E8">();</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">  if</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">string</span><span style="color:#E1E4E8">.</span><span style="color:#B392F0">Equals</span><span style="color:#E1E4E8">(input</span><span style="color:#F97583">?</span><span style="color:#E1E4E8">.</span><span style="color:#B392F0">Trim</span><span style="color:#E1E4E8">(), </span><span style="color:#9ECBFF">"exit"</span><span style="color:#E1E4E8">))</span></span>
+<span class="line"><span style="color:#E1E4E8">  {</span></span>
+<span class="line"><span style="color:#E1E4E8">    Console.</span><span style="color:#B392F0">WriteLine</span><span style="color:#E1E4E8">(</span><span style="color:#9ECBFF">"Завершение работы программы."</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#F97583">    break</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#E1E4E8">  }</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">  Console.</span><span style="color:#B392F0">WriteLine</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">await</span><span style="color:#E1E4E8"> client.</span><span style="color:#B392F0">GetAiResponseAsync</span><span style="color:#E1E4E8">(input));</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+<p>Теперь можно запускать и тестировать общение с llm в консоли! Да, это только поиграться, но можно так же и лучше познакомиться с работой с LLM.</p>
+<p>Если есть много желания, то можно посмотреть код чуть подробнее в <a href="https://github.com/squareKolobok/blog-examples/tree/master/OpenAiApi">репозитории</a>. Там есть стриминговое получение ответа, сжатие контекста, получение информации о текущем числе токенов.</p>
+</main></body></html>
