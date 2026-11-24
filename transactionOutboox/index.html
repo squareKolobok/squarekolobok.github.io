@@ -1,0 +1,105 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="icon" href="/favicon.ico"><meta name="generator" content="Astro v7.3.2"><meta name="google-site-verification" content="ROpn4f1x-HSzpSU53wltvmRdPDtK_lc6nS6VseE1VUc"><title>Transactional Outbox</title><link rel="stylesheet" href="/_astro/Layout.Cm3C8b9g.css"></head><body><header class="header" data-astro-cid-nen7h5rs><div class="header-container" data-astro-cid-nen7h5rs><a href="/" class="logo" data-astro-cid-nen7h5rs>БАК</a><nav class="nav" data-astro-cid-nen7h5rs><ul class="nav-list" data-astro-cid-nen7h5rs><li class="nav-item" data-astro-cid-nen7h5rs><a href="/" class="nav-link" data-astro-cid-nen7h5rs>Главная</a></li><li class="nav-item" data-astro-cid-nen7h5rs><a href="/about" class="nav-link" data-astro-cid-nen7h5rs>О нас</a></li></ul></nav></div></header><main class="container"><h1 id="паттерн-transactional-outbox-как-гарантировать-доставку-событий">Паттерн Transactional Outbox: Как гарантировать доставку событий</h1>
+<p><small>12 ноябрь 2026 г.</small></p>
+<p>Привет! Сегодня рассмотрим вопрос: Как обновить данные в БД и одновременно отправить какое-то уведомление, чтобы обе эти операций не потерялись.</p>
+<hr>
+<h2 id="расмотрим-случай">Расмотрим случай:</h2>
+<p>Пользователь оформляет заказ в интернет-магазине. Что нам нужно:</p>
+<ol>
+<li>Сохранить заказ в БД <code>OrdersDB</code>.</li>
+<li>Опубликовать событие <code>OrderCreated</code> в Kafka/RabbitMQ/внешний сервис, чтобы сервис уведомлений отправил письмо клиенту, а сервис склада забронировал товар.</li>
+</ol>
+<hr>
+<h3 id="почему-обычный-подход-не-работает">Почему обычный подход не работает?</h3>
+<p><strong>Вариант А: Сначала пишем в БД, потом отправляем во внешний сервис</strong></p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="go"><code><span class="line"><span style="color:#B392F0">begin_transaction</span><span style="color:#E1E4E8">();</span></span>
+<span class="line"><span style="color:#B392F0">save_order_to_db</span><span style="color:#E1E4E8">();</span></span>
+<span class="line"><span style="color:#B392F0">commit_transaction</span><span style="color:#E1E4E8">(); </span><span style="color:#6A737D">// БД обновилась успешно</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#B392F0">send_to_kafka</span><span style="color:#E1E4E8">(); </span><span style="color:#6A737D">//  Сеть моргнула, внешний сервис не получил заказ.</span></span></code></pre>
+<p><em>Итог:</em> Заказ в БД есть, но склад о нем не знает. Деньги списаны, товар не забронирован, клиент в ярости. Нарушен принцип <strong>Атомарности</strong>.</p>
+<p><strong>Вариант Б: Сначала отправляем во внешний сервис, потом пишем в БД</strong></p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="go"><code><span class="line"><span style="color:#B392F0">send_to_kafka</span><span style="color:#E1E4E8">(); </span><span style="color:#6A737D">// Событие улетело во вне, склад уже собирает товар</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#B392F0">begin_transaction</span><span style="color:#E1E4E8">();</span></span>
+<span class="line"><span style="color:#B392F0">save_order_to_db</span><span style="color:#E1E4E8">(); </span><span style="color:#6A737D">//  Ошибка уникальности, упал коннект к БД, транзакция откатилась.</span></span></code></pre>
+<p><em>Итог:</em> В базе данных заказа нет (транзакция отменена), но склад уже упаковал товар и отправил его в никуда. <strong>Консистентность</strong> системы нарушена.</p>
+<blockquote>
+<p><strong>Главный вывод:</strong> Нам нужен способ объединить эти два действия в единую транзакцию.</p>
+</blockquote>
+<hr>
+<p>Для решения этого вопроса мы разберем паттерн <strong>Transactional Outbox</strong>. Обсудим, какую боль он лечит, как устроен изнутри, а главное — с какими «подводными камнями» столкнемся на практике.</p>
+<hr>
+<h2 id="как-работает-transactional-outbox">Как работает Transactional Outbox</h2>
+<p>Идея паттерна проста: <strong>мы перестаем напрямую писать во внешний серивис</strong>. Вместо этого мы пишем сообщение в специальную таблицу <code>outbox</code> внутри той же самой базы данных и в рамках той же самой транзакции.</p>
+<h3 id="пошаговый-алгоритм">Пошаговый алгоритм:</h3>
+<ol>
+<li><strong>Бизнес-транзакция:</strong> В рамках одной транзакции мы:
+<ul>
+<li>Создаем/обновляем бизнес-сущность (например, запись в таблице <code>orders</code>).</li>
+<li>Создаем запись в таблице <code>outbox</code> (содержит payload события, тип события, статус).</li>
+<li>Делаем <code>COMMIT</code>. Если что-то идет не так, откатывается и заказ, и запись в outbox. Всё или ничего.</li>
+</ul>
+</li>
+<li><strong>Асинхронная отправка:</strong> Отдельный воркер читает таблицу <code>outbox</code>, берет неотправленные сообщения, отправляет во вне и помечает как отправленные или удаляет.</li>
+</ol>
+<h3 id="схема-процесса">Схема процесса:</h3>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="mermaid"><code><span class="line"><span style="color:#F97583">graph</span><span style="color:#B392F0"> TD</span></span>
+<span class="line"><span style="color:#FFAB70">    Client</span><span style="color:#F97583">[</span><span style="color:#9ECBFF">Клиент</span><span style="color:#F97583">]</span><span style="color:#F97583"> --&gt;|</span><span style="color:#9ECBFF">1. Запрос</span><span style="color:#F97583">|</span><span style="color:#FFAB70"> Service</span><span style="color:#F97583">[</span><span style="color:#9ECBFF">Сервис Заказов</span><span style="color:#F97583">]</span></span>
+<span class="line"><span style="color:#E1E4E8">    </span></span>
+<span class="line"><span style="color:#F97583">    subgraph</span><span style="color:#B392F0"> Transaction </span><span style="color:#E1E4E8">[</span><span style="color:#FFAB70">Локальная транзакция</span><span style="color:#E1E4E8">]</span></span>
+<span class="line"><span style="color:#FFAB70">        Service </span><span style="color:#F97583">--&gt;|</span><span style="color:#9ECBFF">2a. Запись заказа</span><span style="color:#F97583">|</span><span style="color:#FFAB70"> OrdersTable</span><span style="color:#F97583">[(</span><span style="color:#9ECBFF">Таблица orders</span><span style="color:#F97583">)]</span></span>
+<span class="line"><span style="color:#FFAB70">        Service </span><span style="color:#F97583">--&gt;|</span><span style="color:#9ECBFF">2b. Запись события</span><span style="color:#F97583">|</span><span style="color:#FFAB70"> OutboxTable</span><span style="color:#F97583">[(</span><span style="color:#9ECBFF">Таблица outbox</span><span style="color:#F97583">)]</span></span>
+<span class="line"><span style="color:#F97583">    end</span></span>
+<span class="line"><span style="color:#E1E4E8">    </span></span>
+<span class="line"><span style="color:#FFAB70">    Relay</span><span style="color:#F97583">[</span><span style="color:#9ECBFF">Message Relay / Воркер</span><span style="color:#F97583">]</span><span style="color:#F97583"> --&gt;|</span><span style="color:#9ECBFF">3. Читает PENDING</span><span style="color:#F97583">|</span><span style="color:#FFAB70"> OutboxTable</span></span>
+<span class="line"><span style="color:#FFAB70">    Relay </span><span style="color:#F97583">--&gt;|</span><span style="color:#9ECBFF">4. Публикует событие</span><span style="color:#F97583">|</span><span style="color:#FFAB70"> External</span><span style="color:#F97583">[</span><span style="color:#9ECBFF">External system</span><span style="color:#F97583">]</span></span>
+<span class="line"><span style="color:#FFAB70">    Relay </span><span style="color:#F97583">--&gt;|</span><span style="color:#9ECBFF">5. Обновляет статус / Удаляет</span><span style="color:#F97583">|</span><span style="color:#FFAB70"> OutboxTable</span></span>
+<span class="line"><span style="color:#E1E4E8">    </span></span>
+<span class="line"><span style="color:#FFAB70">    style Transaction stroke</span><span style="color:#E1E4E8">:#</span><span style="color:#FFAB70">333</span><span style="color:#E1E4E8">,</span><span style="color:#FFAB70">stroke-width</span><span style="color:#E1E4E8">:</span><span style="color:#FFAB70">2px</span></span></code></pre>
+<hr>
+<h2 id="как-реализовать-воркер-отправки">Как реализовать воркер отправки</h2>
+<p>Есть два основных подхода к реализации механизма, который перекладывает сообщения из <code>outbox</code> во вне:</p>
+<h3 id="1-опрос-таблицы">1. Опрос таблицы</h3>
+<p>Простой фоновый воркер (например, Quartz, Celery, Go-рутина или Шедулер), который каждые N миллисекунд делает запрос в БД:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="sql"><code><span class="line"><span style="color:#F97583">SELECT</span><span style="color:#F97583"> *</span><span style="color:#F97583"> FROM</span><span style="color:#E1E4E8"> outbox </span><span style="color:#F97583">WHERE</span><span style="color:#F97583"> status</span><span style="color:#F97583"> =</span><span style="color:#9ECBFF"> 'PENDING'</span><span style="color:#F97583"> LIMIT</span><span style="color:#79B8FF"> 100</span><span style="color:#E1E4E8">;</span></span></code></pre>
+<p>Отправляет в внешнюю систему и меняет статус на <code>PROCESSED</code>.</p>
+<ul>
+<li><strong>Плюсы:</strong> Легко написать, работает на любой БД.</li>
+<li><strong>Минусы:</strong> Создает дополнительную нагрузку на БД постоянными <code>SELECT</code>’ами. Из-за интервала опроса появляется задержка отправки сообщений.</li>
+</ul>
+<h3 id="2-transaction-log-mining--cdc-change-data-capture">2. Transaction Log Mining / CDC (Change Data Capture)</h3>
+<p>Более продвинутый и производительный подход. Мы используем специализированный инструмент (например, <strong>Debezium</strong>), который подключается напрямую к логу транзакций БД (WAL в PostgreSQL, binlog в MySQL). Как только в таблице <code>outbox</code> появляется новая строка, Debezium моментально считывает её из лога и пушит в внещнюю систему.</p>
+<ul>
+<li><strong>Плюсы:</strong> Нулевая нагрузка на БД через SQL-запросы, минимальная задержка (near real-time).</li>
+<li><strong>Минусы:</strong> Сложность настройки инфраструктуры, привязка к конкретной СУБД.</li>
+</ul>
+<hr>
+<h2 id="проблемы-и-боли-паттерна-с-которыми-вы-столкнетесь">Проблемы и боли паттерна, с которыми вы столкнетесь</h2>
+<p>А теперь перейдем к самому важному — к граблям, на которые обязательно наступите, если будете внедрять этот паттерн «в лоб».</p>
+<h3 id="1-гарантия-доставки">1. Гарантия доставки</h3>
+<p>Паттерн гарантирует, что сообщение <strong>не потеряется</strong>. Но он не гарантирует, что оно отправится <strong>ровно один раз</strong>.</p>
+<ul>
+<li><em>Сценарий:</em> Воркер прочитал строку из outbox, отправил во внешнюю сиситему, она в свою очередь прислала подтверждение, но в этот же миг воркер упал, не успев обновить статус строки в БД на <code>PROCESSED</code>. После перезапуска воркер прочитает ту же строку и отправит сообщение <strong>повторно</strong>.</li>
+<li><strong>Решение:</strong> Все потребители на той стороне <strong>должны быть строго идемпотентными</strong>. Они должны уметь отсекать дубликаты (например, по уникальному <code>event_id</code>).</li>
+</ul>
+<h3 id="2-проблема-конкурентности-воркеров">2. Проблема конкурентности воркеров</h3>
+<p>Если запущено несколько инстансов сервиса, и каждый опрашивает outbox таблицу, тогда инстансы могут начинать читать одни и те же строки из таблицы outbox и дублировать отправку, либо блокировать друг друга.</p>
+<ul>
+<li><strong>Решение:</strong> Применять конструкции блокировок, например <code>SELECT ... FOR UPDATE SKIP LOCKED</code>. Это позволит воркеру захватить строки и пропустить те, которые уже обрабатываются другим инстансом.</li>
+</ul>
+<h3 id="3-опухание-базы-данных">3. Опухание базы данных</h3>
+<p>Если сервис высоконагруженный (сотни транзакций в секунду), таблица <code>outbox</code> будет расти с космической скоростью. Даже если обновляется статус на <code>PROCESSED</code>, строки остаются в базе. В PostgreSQL частые <code>UPDATE/DELETE</code> приводят к генерации мертвых строк и нагрузке на <code>VACUUM</code>. Таблица начинает тормозить.</p>
+<ul>
+<li><strong>Решение:</strong> Нужно не просто обновить статус, а физически удалить успешно отправленные строки. Для логов можно использовать партиционирование таблицы по дням/часам, чтобы быстро дропать старые данные, либо вынести историю в cold storage.</li>
+</ul>
+<h3 id="4-нарушение-порядка-сообщений">4. Нарушение порядка сообщений</h3>
+<p>В распределенных системах порядок событий часто имеет критическое значение (например, <code>UserCreated</code> должно уйти строго перед <code>UserUpdated</code>). Если выбирать сообщения пачками и отправлять их в параллельных потоках, порядок может нарушиться.</p>
+<ul>
+<li><strong>Решение:</strong> При чтении из таблицы обязательно нужно делать сортировку по возрастанию Id.</li>
+</ul>
+<h3 id="5-падение-производительности-бизнес-транзакций">5. Падение производительности бизнес-транзакций</h3>
+<p>Каждая бизнес-операция теперь нагружена дополнительным инсертом в таблицу <code>outbox</code>. Растут индексы, увеличивается время жизни транзакции.</p>
+<ul>
+<li><strong>Решение:</strong> Держать таблицу <code>outbox</code> максимально «легкой». Храните там только необходимый минимум: <code>event_id</code>, <code>event_type</code>, <code>aggregate_id</code> и <code>payload</code> в формате JSON. Не нужно строить по этой таблице тяжелых индексов, кроме тех, что нужны воркеру отправки.</li>
+</ul>
+</main><script data-goatcounter="https://squarekolobok.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script></body></html>
